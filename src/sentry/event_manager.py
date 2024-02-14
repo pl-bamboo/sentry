@@ -1637,22 +1637,22 @@ def _save_aggregate_new(
     group_processing_kwargs = _get_group_processing_kwargs(job)
 
     primary_grouping_config, primary_hashes = run_primary_grouping(project, job, metric_tags)
-    secondary_grouping_config, secondary_hashes = maybe_run_secondary_grouping(
-        project, job, metric_tags
-    )
-
     primary_grouphashes = [
         GroupHash.objects.get_or_create(project=project, hash=hash)[0]
         for hash in extract_hashes(primary_hashes)
     ]
+    existing_primary_grouphash = find_existing_grouphash_new(primary_grouphashes)
+
+    secondary_grouping_config, secondary_hashes = maybe_run_secondary_grouping(
+        project, job, metric_tags
+    )
     secondary_grouphashes = [
         GroupHash.objects.get_or_create(project=project, hash=hash)[0]
         for hash in extract_hashes(secondary_hashes)
     ]
-    all_grouphashes = primary_grouphashes + secondary_grouphashes
-
-    existing_primary_grouphash = find_existing_grouphash_new(primary_grouphashes)
     existing_secondary_grouphash = find_existing_grouphash_new(secondary_grouphashes)
+
+    all_grouphashes = primary_grouphashes + secondary_grouphashes
 
     if existing_primary_grouphash:
         group_info = handle_existing_grouphash(
