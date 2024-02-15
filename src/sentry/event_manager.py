@@ -4,7 +4,7 @@ import ipaddress
 import logging
 import re
 import uuid
-from collections.abc import Mapping, MutableMapping, Sequence
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, TypedDict, cast
@@ -61,6 +61,7 @@ from sentry.grouping.ingest import (
     run_primary_grouping,
     update_grouping_config_if_needed,
 )
+from sentry.grouping.result import CalculatedHashes
 from sentry.ingest.inbound_filters import FilterStatKeys
 from sentry.issues.grouptype import GroupCategory
 from sentry.issues.issue_occurrence import IssueOccurrence
@@ -143,6 +144,14 @@ class GroupInfo:
     is_regression: bool
     group_release: GroupRelease | None = None
     is_new_group_environment: bool = False
+
+
+@dataclass
+class GroupHashInfo:
+    config: GroupingConfig | None
+    hashes: CalculatedHashes | None
+    grouphashes: list[GroupHash]
+    existing_grouphash: GroupHash | None
 
 
 def pop_tag(data: dict[str, Any], key: str) -> None:
@@ -1636,32 +1645,19 @@ def _save_aggregate_new(
 
     group_processing_kwargs = _get_group_processing_kwargs(job)
 
-    primary_grouping_config, primary_hashes = run_primary_grouping(project, job, metric_tags)
-    primary_grouphashes = [
-        GroupHash.objects.get_or_create(project=project, hash=hash)[0]
-        for hash in extract_hashes(primary_hashes)
-    ]
-    existing_primary_grouphash = find_existing_grouphash_new(primary_grouphashes)
+    primary = create_and_seek_grouphashes(run_primary_grouping, job, metric_tags)
+    secondary = create_and_seek_grouphashes(maybe_run_secondary_grouping, job, metric_tags)
 
-    secondary_grouping_config, secondary_hashes = maybe_run_secondary_grouping(
-        project, job, metric_tags
-    )
-    secondary_grouphashes = [
-        GroupHash.objects.get_or_create(project=project, hash=hash)[0]
-        for hash in extract_hashes(secondary_hashes)
-    ]
-    existing_secondary_grouphash = find_existing_grouphash_new(secondary_grouphashes)
+    all_grouphashes = primary.grouphashes + secondary.grouphashes
 
-    all_grouphashes = primary_grouphashes + secondary_grouphashes
-
-    if existing_primary_grouphash:
+    if primary.existing_grouphash:
         group_info = handle_existing_grouphash(
-            job, existing_primary_grouphash, all_grouphashes, group_processing_kwargs
+            job, primary.existing_grouphash, all_grouphashes, group_processing_kwargs
         )
     else:
-        if existing_secondary_grouphash:
+        if secondary.existing_grouphash:
             group_info = handle_existing_grouphash(
-                job, existing_secondary_grouphash, all_grouphashes, group_processing_kwargs
+                job, secondary.existing_grouphash, all_grouphashes, group_processing_kwargs
             )
         else:
             group_info = create_group_with_grouphashes(
@@ -1676,7 +1672,13 @@ def _save_aggregate_new(
     maybe_run_background_grouping(project, job)
 
     record_hash_calculation_metrics(
-        primary_grouping_config, primary_hashes, secondary_grouping_config, secondary_hashes
+        # Cast in lieu of a non-null assertion operator
+        # TODO: The typing here is gross, but might be able to be improved once hierarchical
+        # grouping is gone
+        cast(GroupingConfig, primary.config),
+        cast(CalculatedHashes, primary.hashes),
+        secondary.config,
+        secondary.hashes,
     )
 
     # Now that we've used the current and possibly secondary grouping config(s) to calculate the
@@ -1686,6 +1688,31 @@ def _save_aggregate_new(
     update_grouping_config_if_needed(project)
 
     return group_info
+
+
+def create_and_seek_grouphashes(
+    grouping_function: Callable[
+        [Project, Job, MutableTags], tuple[GroupingConfig | None, CalculatedHashes | None]
+    ],
+    job: Job,
+    metric_tags: MutableTags,
+) -> GroupHashInfo:
+    project = job["event"].project
+
+    grouphashes = []
+    existing_grouphash = None
+
+    grouping_config, hashes = grouping_function(project, job, metric_tags)
+
+    if hashes:
+        grouphashes = [
+            GroupHash.objects.get_or_create(project=project, hash=hash)[0]
+            for hash in extract_hashes(hashes)
+        ]
+
+        existing_grouphash = find_existing_grouphash_new(grouphashes)
+
+    return GroupHashInfo(grouping_config, hashes, grouphashes, existing_grouphash)
 
 
 def handle_existing_grouphash(
