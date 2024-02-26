@@ -91,7 +91,7 @@ sudo-askpass() {
 }
 
 pip-install() {
-    pip install --constraint requirements-dev-frozen.txt "$@"
+    pip install -vvv --constraint requirements-dev-frozen.txt "$@"
 }
 
 upgrade-pip() {
