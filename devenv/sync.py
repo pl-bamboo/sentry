@@ -127,7 +127,6 @@ def main(context: dict[str, str]) -> int:
         reporoot,
         venv_dir,
         (
-            ("javascript dependencies", ("make", "install-js-dev")),
             ("python dependencies", ("make", "install-py-dev")),
         ),
     ):
