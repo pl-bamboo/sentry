@@ -21,6 +21,7 @@ setup-git \
 node-version-check \
 install-js-dev \
 install-py-dev :
+	./.venv/bin/pip install -vvv --constraint requirements-dev-frozen.txt sentry-cli
 	@./scripts/do.sh $@
 
 build-platform-assets \
