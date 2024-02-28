@@ -18,12 +18,16 @@ from sentry.monitors.constants import SUBTITLE_DATETIME_FORMAT, TIMEOUT
 from sentry.monitors.models import (
     CheckInStatus,
     MonitorCheckIn,
+    MonitorEnvBrokenDetection,
     MonitorEnvironment,
     MonitorIncident,
     MonitorStatus,
 )
 
 logger = logging.getLogger(__name__)
+
+NUM_CONSECUTIVE_BROKEN_CHECKINS = 4
+NUM_DAYS_BROKEN_PERIOD = 3
 
 
 def mark_failed(
@@ -171,6 +175,51 @@ def mark_failed_threshold(failed_checkin: MonitorCheckIn, failure_issue_threshol
 
         # get the existing grouphash from the monitor environment
         fingerprint = monitor_env.incident_grouphash
+
+        has_broken_monitor_detection = False
+        try:
+            organization = Organization.objects.get_from_cache(
+                id=monitor_env.monitor.organization_id
+            )
+            has_broken_monitor_detection = features.has(
+                "organizations:crons-broken-monitor-detection", organization=organization
+            )
+        except Organization.DoesNotExist:
+            pass
+
+        active_incident = monitor_env.active_incident
+        if has_broken_monitor_detection and active_incident:
+            # ensure no existing detection exists and monitor isn't muted
+            open_detection = MonitorEnvBrokenDetection.objects.filter(
+                monitor_incident=active_incident
+            ).first()
+            if not open_detection and not monitor_muted:
+                recent_checkins = list(
+                    MonitorCheckIn.objects.filter(
+                        monitor_environment=monitor_env,
+                        date_added__lte=failed_checkin.date_added,
+                    )
+                    .order_by("-date_added")
+                    .values("id", "date_added", "status")[:NUM_CONSECUTIVE_BROKEN_CHECKINS]
+                )
+                days_failing = (failed_checkin.date_added - active_incident.starting_timestamp).days
+
+                if (
+                    len(recent_checkins) == NUM_CONSECUTIVE_BROKEN_CHECKINS
+                    and all(
+                        [
+                            checkin["status"]
+                            in [CheckInStatus.ERROR, CheckInStatus.TIMEOUT, CheckInStatus.MISSED]
+                            for checkin in recent_checkins
+                        ]
+                    )
+                    and days_failing >= NUM_DAYS_BROKEN_PERIOD
+                ):
+                    MonitorEnvBrokenDetection.objects.create(
+                        monitor_incident=active_incident,
+                        detection_timestamp=failed_checkin.date_added,
+                    )
+
     else:
         # don't send occurrence for other statuses
         return False

@@ -16,6 +16,7 @@ from sentry.monitors.models import (
     CheckInStatus,
     Monitor,
     MonitorCheckIn,
+    MonitorEnvBrokenDetection,
     MonitorEnvironment,
     MonitorIncident,
     MonitorStatus,
@@ -854,3 +855,69 @@ class MarkFailedTestCase(TestCase):
 
         monitor_incidents = MonitorIncident.objects.filter(monitor_environment=monitor_environment)
         assert len(monitor_incidents) == 0
+
+    @with_feature("organizations:issue-platform")
+    @with_feature("organizations:crons-broken-monitor-detection")
+    def test_mark_failed_detected_broken(self):
+        monitor = Monitor.objects.create(
+            name="test monitor",
+            organization_id=self.organization.id,
+            project_id=self.project.id,
+            type=MonitorType.CRON_JOB,
+            config={
+                "schedule": [1, "day"],
+                "schedule_type": ScheduleType.INTERVAL,
+                "failure_issue_threshold": 1,
+                "max_runtime": None,
+                "checkin_margin": None,
+            },
+        )
+        monitor_environment = MonitorEnvironment.objects.create(
+            monitor=monitor,
+            environment_id=self.environment.id,
+            status=MonitorStatus.OK,
+            last_state_change=None,
+        )
+
+        MonitorCheckIn.objects.create(
+            monitor=monitor,
+            monitor_environment=monitor_environment,
+            project_id=self.project.id,
+            status=CheckInStatus.OK,
+            date_added=timezone.now() - timedelta(days=4),
+        )
+        failing_check = MonitorCheckIn.objects.create(
+            monitor=monitor,
+            monitor_environment=monitor_environment,
+            project_id=self.project.id,
+            status=CheckInStatus.ERROR,
+            date_added=timezone.now() - timedelta(days=4),
+        )
+        mark_failed(failing_check, ts=failing_check.date_added)
+
+        # check that an incident has been created correctly
+        monitor_incidents = MonitorIncident.objects.filter(monitor_environment=monitor_environment)
+        assert len(monitor_incidents) == 1
+        monitor_incident = monitor_incidents.first()
+
+        broken_detections = MonitorEnvBrokenDetection.objects.filter(
+            monitor_incident=monitor_incident
+        )
+        assert len(broken_detections) == 0
+
+        # send 4 failing check-ins to trigger the broken detection criteria
+        for i in range(3, -1, -1):
+            failing_check = MonitorCheckIn.objects.create(
+                monitor=monitor,
+                monitor_environment=monitor_environment,
+                project_id=self.project.id,
+                status=CheckInStatus.ERROR,
+                date_added=timezone.now() - timedelta(days=i),
+            )
+            mark_failed(failing_check, ts=failing_check.date_added)
+
+        # check that a broken detection has been created
+        broken_detections = MonitorEnvBrokenDetection.objects.filter(
+            monitor_incident=monitor_incident
+        )
+        assert len(broken_detections) == 1
