@@ -107,6 +107,8 @@ def main(context: dict[str, str]) -> int:
         # TODO: move limactl version into per-repo config
         limactl.install()
 
+    return 0
+
     if not run_procs(
         repo,
         reporoot,
