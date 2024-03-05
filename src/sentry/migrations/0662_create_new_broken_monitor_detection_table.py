@@ -22,7 +22,7 @@ class Migration(CheckedMigration):
     is_dangerous = False
 
     dependencies = [
-        ("sentry", "0660_fix_cron_monitor_invalid_orgs"),
+        ("sentry", "0661_artifactbundleindex_cleanup_step2"),
     ]
 
     operations = [
