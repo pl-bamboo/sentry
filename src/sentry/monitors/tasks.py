@@ -11,6 +11,7 @@ from arroyo import Partition, Topic
 from arroyo.backends.kafka import KafkaPayload, KafkaProducer, build_kafka_configuration
 from confluent_kafka.admin import AdminClient, PartitionMetadata
 from django.conf import settings
+from django.utils import timezone as django_timezone
 
 from sentry import features
 from sentry.constants import ObjectStatus
@@ -416,7 +417,7 @@ def mark_checkin_timeout(checkin_id: int, ts: datetime, **kwargs):
     record_timing=True,
 )
 def detect_broken_monitor_envs():
-    current_time = timezone.now()
+    current_time = django_timezone.now()
     open_incidents = MonitorIncident.objects.select_related("monitor").filter(
         resolving_checkin=None,
         starting_timestamp__lte=(current_time - timedelta(days=NUM_DAYS_BROKEN_PERIOD)),
@@ -448,7 +449,7 @@ def detect_broken_monitor_envs():
         ):
             continue
 
-        detection = MonitorEnvBrokenDetection.objects.get_or_create(
+        detection, _ = MonitorEnvBrokenDetection.objects.get_or_create(
             monitor_incident=open_incident, defaults={"detection_timestamp": current_time}
         )
         if not detection.user_notified_timestamp:
