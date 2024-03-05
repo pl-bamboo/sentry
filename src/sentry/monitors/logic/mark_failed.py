@@ -143,8 +143,10 @@ def mark_failed_threshold(failed_checkin: MonitorCheckIn, failure_issue_threshol
         if not monitor_muted:
             starting_checkin = previous_checkins[0]
 
-            # for new incidents, generate a new hash from a uuid to use
-            fingerprint = hash_from_values([uuid.uuid4()])
+            # for new incidents, generate a uuid as the fingerprint. This is
+            # not deterministic of any property of the incident and is simply
+            # used to associate the incident to it's event occurrences
+            fingerprint = uuid.uuid4().hex
 
             MonitorIncident.objects.create(
                 monitor=monitor_env.monitor,
