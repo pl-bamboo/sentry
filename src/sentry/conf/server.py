@@ -1232,7 +1232,7 @@ CELERYBEAT_SCHEDULE_REGION = {
             minute="0",
             hour="12",  # 05:00 PDT, 09:00 EDT, 12:00 UTC
         ),
-        "options": {"expires": 60 * 60},
+        "options": {"expires": 15 * 60},
     },
 }
 

@@ -411,8 +411,8 @@ def mark_checkin_timeout(checkin_id: int, ts: datetime, **kwargs):
 @instrumented_task(
     name="sentry.monitors.tasks.detect_broken_monitor_envs",
     max_retries=0,
-    time_limit=60 * 60,
-    soft_time_limit=45 * 60,
+    time_limit=15 * 60,
+    soft_time_limit=10 * 60,
     record_timing=True,
 )
 def detect_broken_monitor_envs():
